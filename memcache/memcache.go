@@ -30,6 +30,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"go.uber.org/atomic"
 )
 
 // Similar to:
@@ -179,6 +181,15 @@ type Client struct {
 	// be set to a number higher than your peak parallel requests.
 	MaxIdleConns int
 
+	// TotalConnections tracks how many new connections have been created over
+	// the lifetime of the client. Use it to identify if MaxIdleConns should be
+	// adjusted. A high rate of new connections may mean that you should adjust
+	// MaxIdleConns higher.
+	//
+	// This is a monotonically increasing value, plat the derivative over time to
+	// track rate change.
+	TotalConnections atomic.Uint64
+
 	selector    ServerSelector
 	stopPolling stop
 
@@ -325,6 +336,7 @@ func (c *Client) getConn(addr net.Addr) (*conn, error) {
 		c:    c,
 	}
 	cn.extendDeadline()
+	c.TotalConnections.Inc()
 	return cn, nil
 }
 
