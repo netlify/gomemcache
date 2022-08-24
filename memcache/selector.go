@@ -171,6 +171,10 @@ type RendezvousSelector struct {
 	*ServerList
 }
 
+// PickServer uses teh rendezvous hashing algorith.
+// It loops over each server, hashes key+server together, and selects the server with the largest hash value.
+// Key -> server mappings should be deterministic and uniformly distributed.
+// This method is threadsafe.
 func (rs RendezvousSelector) PickServer(key string) (net.Addr, error) {
 	buf := keyBufPool.Get().(*[]byte)
 	defer keyBufPool.Put(buf)
