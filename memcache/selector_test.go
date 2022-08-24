@@ -103,17 +103,15 @@ var servers = []string{"127.0.0.1:1000", "127.0.0.1:1001", "127.0.0.1:1002", "12
 
 func TestRendezvousSelector_PickServer(t *testing.T) {
 	t.Run("empty returns error", func(t *testing.T) {
-		rs := RendezvousSelector{&ServerList{}}
+		rs := NewRendezvousSelector()
 		_, err := rs.PickServer("key")
 		require.ErrorIs(t, err, ErrNoServers)
 	})
 
 	t.Run("single node", func(t *testing.T) {
-		sl := ServerList{}
 		server := "127.0.0.1:1234"
-		require.NoError(t, sl.SetServers(server))
-
-		rs := RendezvousSelector{&sl}
+		rs := NewRendezvousSelector()
+		require.NoError(t, rs.SetServers(server))
 
 		keys := randKeys(1000)
 		for _, key := range keys {
@@ -124,9 +122,8 @@ func TestRendezvousSelector_PickServer(t *testing.T) {
 	})
 
 	t.Run("key is consistently routed", func(t *testing.T) {
-		sl := ServerList{}
-		require.NoError(t, sl.SetServers(servers...))
-		rs := RendezvousSelector{&sl}
+		rs := NewRendezvousSelector()
+		require.NoError(t, rs.SetServers(servers...))
 
 		keys := randKeys(1000)
 		previous := make(map[string]net.Addr)
@@ -150,9 +147,8 @@ func TestRendezvousSelector_PickServer(t *testing.T) {
 	})
 
 	t.Run("all servers are routed to", func(t *testing.T) {
-		sl := ServerList{}
-		require.NoError(t, sl.SetServers(servers...))
-		rs := RendezvousSelector{&sl}
+		rs := NewRendezvousSelector()
+		require.NoError(t, rs.SetServers(servers...))
 
 		keys := randKeys(1000)
 		set := make(map[string]struct{})
@@ -166,9 +162,8 @@ func TestRendezvousSelector_PickServer(t *testing.T) {
 	})
 
 	t.Run("server added", func(t *testing.T) {
-		sl := ServerList{}
-		require.NoError(t, sl.SetServers(servers...))
-		rs := RendezvousSelector{&sl}
+		rs := NewRendezvousSelector()
+		require.NoError(t, rs.SetServers(servers...))
 
 		keys := randKeys(1000)
 		previous := make(map[string]net.Addr)
@@ -194,9 +189,8 @@ func TestRendezvousSelector_PickServer(t *testing.T) {
 	})
 
 	t.Run("server removed", func(t *testing.T) {
-		sl := ServerList{}
-		require.NoError(t, sl.SetServers(servers...))
-		rs := RendezvousSelector{&sl}
+		rs := NewRendezvousSelector()
+		require.NoError(t, rs.SetServers(servers...))
 
 		keys := randKeys(1000)
 		previous := make(map[string]net.Addr)
@@ -223,9 +217,9 @@ func TestRendezvousSelector_PickServer(t *testing.T) {
 }
 
 func BenchmarkRendezvousSelector_PickServer(b *testing.B) {
-	sl := ServerList{}
-	require.NoError(b, sl.SetServers(servers...))
-	rs := RendezvousSelector{&sl}
+	rs := NewRendezvousSelector()
+	require.NoError(b, rs.SetServers(servers...))
+
 	key := randString(64)
 
 	b.ReportAllocs()

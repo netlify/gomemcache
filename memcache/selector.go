@@ -161,6 +161,12 @@ func (ss *ServerList) PickServer(key string) (net.Addr, error) {
 	return ss.addrs[cs%uint32(len(ss.addrs))], nil
 }
 
+func NewRendezvousSelector() RendezvousSelector {
+	return RendezvousSelector{new(ServerList)}
+}
+
+// RendezvousSelector is a ServerSelector which uses the rendezvous hashing algorithm to select a server for a given key.
+// See https://en.wikipedia.org/wiki/Rendezvous_hashing
 type RendezvousSelector struct {
 	*ServerList
 }

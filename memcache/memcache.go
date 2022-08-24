@@ -142,7 +142,7 @@ func NewDynamicRendezvousClient(discoveryAddress string, pollingDuration time.Du
 	if pollingDuration.Seconds() < 1.0 {
 		return nil, ErrInvalidPollingDuration
 	}
-	return newDiscoveryClient(discoveryAddress, RendezvousSelector{new(ServerList)}, pollingDuration)
+	return newDiscoveryClient(discoveryAddress, NewRendezvousSelector(), pollingDuration)
 }
 
 // for the unit test
