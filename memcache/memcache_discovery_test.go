@@ -73,7 +73,7 @@ func TestDiscoveryUnixSocket(t *testing.T) {
 	}
 
 	fakeDiscoveryServer.updateDiscoveryInformation(1, openPorts)
-	discoveryClient, err := newDiscoveryClient(fakeDiscoveryServer.currentAddress, testPollingTime)
+	discoveryClient, err := newDiscoveryClient(fakeDiscoveryServer.currentAddress, new(ServerList), testPollingTime)
 	if err != nil {
 		t.Fatalf("could not create discovery client due to %v", err)
 	}

@@ -134,18 +134,25 @@ func NewDiscoveryClient(discoveryAddress string, pollingDuration time.Duration) 
 	if pollingDuration.Seconds() < 1.0 {
 		return nil, ErrInvalidPollingDuration
 	}
-	return newDiscoveryClient(discoveryAddress, pollingDuration)
+	return newDiscoveryClient(discoveryAddress, new(ServerList), pollingDuration)
+}
+
+func NewDynamicRendezvousClient(discoveryAddress string, pollingDuration time.Duration) (*Client, error) {
+	// Validate pollingDuration
+	if pollingDuration.Seconds() < 1.0 {
+		return nil, ErrInvalidPollingDuration
+	}
+	return newDiscoveryClient(discoveryAddress, RendezvousSelector{new(ServerList)}, pollingDuration)
 }
 
 // for the unit test
-func newDiscoveryClient(discoveryAddress string, pollingDuration time.Duration) (*Client, error) {
+func newDiscoveryClient(discoveryAddress string, selector ServerSelector, pollingDuration time.Duration) (*Client, error) {
 	// creates a new ServerList object which contains all the server eventually.
 	rand.Seed(time.Now().UnixNano())
-	ss := new(ServerList)
 	mcCfgPollerHelper := New(discoveryAddress)
-	cfgPoller := newConfigPoller(pollingDuration, ss, mcCfgPollerHelper)
+	cfgPoller := newConfigPoller(pollingDuration, selector, mcCfgPollerHelper)
 	// cfgPoller starts polling immediately.
-	mcClient := NewFromSelector(ss)
+	mcClient := NewFromSelector(selector)
 	mcClient.stopPolling = cfgPoller.stopPolling
 	return mcClient, nil
 }
