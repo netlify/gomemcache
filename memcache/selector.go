@@ -42,7 +42,15 @@ type ServerSelector interface {
 	// This can be used to get information which is server agnostic.
 	PickAnyServer() (net.Addr, error)
 	Each(func(net.Addr) error) error
+
+	// SetServers updates the list of servers available for selection.
+	SetServers(servers ...string) error
 }
+
+var (
+	_ ServerSelector = (*ServerList)(nil)
+	_ ServerSelector = RendezvousSelector{}
+)
 
 // ServerList is a simple ServerSelector. Its zero value is usable.
 type ServerList struct {
@@ -151,4 +159,50 @@ func (ss *ServerList) PickServer(key string) (net.Addr, error) {
 	keyBufPool.Put(bufp)
 
 	return ss.addrs[cs%uint32(len(ss.addrs))], nil
+}
+
+func NewRendezvousSelector() RendezvousSelector {
+	return RendezvousSelector{new(ServerList)}
+}
+
+// RendezvousSelector is a ServerSelector which uses the rendezvous hashing algorithm to select a server for a given key.
+// See https://en.wikipedia.org/wiki/Rendezvous_hashing
+type RendezvousSelector struct {
+	*ServerList
+}
+
+// PickServer uses the rendezvous hashing algorithm.
+// It loops over each server, hashes key+server together, and selects the server with the largest hash value.
+// Key -> server mappings should be deterministic and uniformly distributed.
+// This method is threadsafe.
+func (rs RendezvousSelector) PickServer(key string) (net.Addr, error) {
+	buf := keyBufPool.Get().(*[]byte)
+	defer keyBufPool.Put(buf)
+	n := copy(*buf, key)
+
+	var (
+		count    int
+		maxScore uint32
+		maxNode  net.Addr
+	)
+
+	err := rs.ServerList.Each(func(addr net.Addr) error {
+		count++
+		*buf = (*buf)[:n] // reset the buffer, by removing the server bytes, it should now only contain the key
+		*buf = append(*buf, addr.String()...)
+		score := crc32.ChecksumIEEE(*buf)
+
+		if score > maxScore || (score == maxScore && strings.Compare(addr.String(), maxNode.String()) > 0) {
+			maxScore = score
+			maxNode = addr
+		}
+
+		return nil
+	})
+
+	if count == 0 {
+		return nil, ErrNoServers
+	}
+
+	return maxNode, err
 }
