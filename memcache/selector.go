@@ -171,7 +171,7 @@ type RendezvousSelector struct {
 	*ServerList
 }
 
-// PickServer uses teh rendezvous hashing algorith.
+// PickServer uses the rendezvous hashing algorithm.
 // It loops over each server, hashes key+server together, and selects the server with the largest hash value.
 // Key -> server mappings should be deterministic and uniformly distributed.
 // This method is threadsafe.

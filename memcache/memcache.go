@@ -130,23 +130,20 @@ var (
 // discoveryAddress should be in following form "ipv4-address:port"
 // Note: pollingDuration should be at least 1 second.
 func NewDiscoveryClient(discoveryAddress string, pollingDuration time.Duration) (*Client, error) {
-	// Validate pollingDuration
-	if pollingDuration.Seconds() < 1.0 {
-		return nil, ErrInvalidPollingDuration
-	}
 	return newDiscoveryClient(discoveryAddress, new(ServerList), pollingDuration)
 }
 
 func NewDynamicRendezvousClient(discoveryAddress string, pollingDuration time.Duration) (*Client, error) {
-	// Validate pollingDuration
-	if pollingDuration.Seconds() < 1.0 {
-		return nil, ErrInvalidPollingDuration
-	}
 	return newDiscoveryClient(discoveryAddress, NewRendezvousSelector(), pollingDuration)
 }
 
 // for the unit test
 func newDiscoveryClient(discoveryAddress string, selector ServerSelector, pollingDuration time.Duration) (*Client, error) {
+	// Validate pollingDuration
+	if pollingDuration.Seconds() < 1.0 {
+		return nil, ErrInvalidPollingDuration
+	}
+
 	// creates a new ServerList object which contains all the server eventually.
 	rand.Seed(time.Now().UnixNano())
 	mcCfgPollerHelper := New(discoveryAddress)
