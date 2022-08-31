@@ -98,8 +98,8 @@ func benchPickAnyServer(b *testing.B, servers ...string) {
 	}
 }
 
-var servers = []string{"127.0.0.1:1000", "127.0.0.1:1001", "127.0.0.1:1002", "127.0.0.1:1003", "127.0.0.1:1004",
-	"127.0.0.1:1005", "127.0.0.1:1006", "127.0.0.1:1007", "127.0.0.1:1008", "127.0.0.1:1009"}
+var servers = []string{"127.0.10.1:1000", "127.0.100.1:1001", "127.100.100.1:1002", "127.0.0.1:1003", "127.0.0.1:1004",
+	"127.0.0.1:11005", "127.0.0.1:1006", "127.0.0.1:1007", "127.0.0.1:1008", "127.0.0.1:1009"}
 
 func TestRendezvousSelector_PickServer(t *testing.T) {
 	t.Run("empty returns error", func(t *testing.T) {
@@ -142,6 +142,28 @@ func TestRendezvousSelector_PickServer(t *testing.T) {
 				}
 
 				require.Equal(t, previous[key].String(), target.String())
+			}
+		}
+	})
+
+	t.Run("server order doesn't matter", func(t *testing.T) {
+		rs := NewRendezvousSelector()
+		require.NoError(t, rs.SetServers(servers...))
+		keys := randKeys(1000)
+
+		for _, k := range keys {
+			target, err := rs.PickServer(k)
+			require.NoError(t, err)
+
+			for i := 0; i < 50; i++ { // shuffle the order of servers on each iteration
+				rand.Shuffle(len(servers), func(i, j int) {
+					servers[i], servers[j] = servers[j], servers[i]
+				})
+				require.NoError(t, rs.SetServers(servers...))
+
+				current, err := rs.PickServer(k)
+				require.NoError(t, err)
+				require.Equal(t, target, current)
 			}
 		}
 	})
@@ -243,7 +265,7 @@ func randString(n int) string {
 
 func randKeys(n int) (keys []string) {
 	for i := 0; i < n; i++ {
-		keys = append(keys, randString(64))
+		keys = append(keys, randString(rand.Intn(128)))
 	}
 	return
 }

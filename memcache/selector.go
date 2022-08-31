@@ -176,21 +176,20 @@ type RendezvousSelector struct {
 // Key -> server mappings should be deterministic and uniformly distributed.
 // This method is threadsafe.
 func (rs RendezvousSelector) PickServer(key string) (net.Addr, error) {
-	buf := keyBufPool.Get().(*[]byte)
-	defer keyBufPool.Put(buf)
-	n := copy(*buf, key)
-
 	var (
 		count    int
 		maxScore uint32
 		maxNode  net.Addr
+		buf      = make([]byte, 0, 256) // max cache key size is 250, go allocates in base 2
 	)
+
+	buf = append(buf, key...)
 
 	err := rs.ServerList.Each(func(addr net.Addr) error {
 		count++
-		*buf = (*buf)[:n] // reset the buffer, by removing the server bytes, it should now only contain the key
-		*buf = append(*buf, addr.String()...)
-		score := crc32.ChecksumIEEE(*buf)
+		buf = buf[:len(key)] // truncate the buffer, after this the buffer will only contain the key, server bytes will be removed.
+		buf = append(buf, addr.String()...)
+		score := crc32.ChecksumIEEE(buf)
 
 		if score > maxScore || (score == maxScore && strings.Compare(addr.String(), maxNode.String()) > 0) {
 			maxScore = score
