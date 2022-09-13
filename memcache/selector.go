@@ -191,7 +191,7 @@ func (rs RendezvousSelector) PickServer(key string) (net.Addr, error) {
 		buf = append(buf, addr.String()...)
 		score := crc32.ChecksumIEEE(buf)
 
-		if score > maxScore || (score == maxScore && strings.Compare(addr.String(), maxNode.String()) > 0) {
+		if score > maxScore || maxNode == nil || (score == maxScore && addr.String() > maxNode.String()) {
 			maxScore = score
 			maxNode = addr
 		}
