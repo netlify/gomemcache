@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -316,27 +317,27 @@ func (cte *ConnectTimeoutError) Error() string {
 }
 
 func (c *Client) dial(addr net.Addr) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), c.netTimeout())
+	defer cancel()
+
 	type connError struct {
 		cn  net.Conn
 		err error
 	}
 
-	addrComponents := strings.Split(addr.String(), ":")
-	if len(addrComponents) != 2 {
-		// Failure, need to have an address and port separated by a :
-		fmt.Println("Incorrect address type")
-	}
-	dialerCtx := New(net.JoinHostPort(addrComponents[0], addrComponents[1]))
-	// Try TLS first
-	dialerCtx.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		var td tls.Dialer
-		td.Config = &tls.Config{
-			InsecureSkipVerify: true, // XXX maybe not right for production, also other settings, e.g. clientcache?
+	dialerContext := c.DialContext
+	// Try using a given context
+	if dialerContext == nil {
+		// For now, follow the default logic of not using tls
+		if dialerContext == nil {
+			dialer := net.Dialer{
+				Timeout: c.netTimeout(),
+			}
+			dialerContext = dialer.DialContext
 		}
-		return td.DialContext(ctx, network, addr)
 	}
 
-	nc, err := net.DialTimeout(addr.Network(), addr.String(), c.netTimeout())
+	nc, err := dialerContext(ctx, addr.Network(), addr.String())
 	if err == nil {
 		return nc, nil
 	}
@@ -345,31 +346,52 @@ func (c *Client) dial(addr net.Addr) (net.Conn, error) {
 		return nil, &ConnectTimeoutError{addr}
 	}
 	// End trying to TLS
-	// Next try to use plain text
-	dialerCtx.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		var d net.Dialer
-		return d.DialContext(ctx, network, addr)
-	}
-
-	nc, err = net.DialTimeout(addr.Network(), addr.String(), c.netTimeout())
-	if err == nil {
-		return nc, nil
-	}
-
-	if ne, ok := err.(net.Error); ok && ne.Timeout() {
-		return nil, &ConnectTimeoutError{addr}
-	}
+	// XXX try plaintext if there is no context
 	// If we got this far, fail
 	return nil, err
 }
 
+// The below is from the gemini gpt, so I don't think
+// it does enough to be confident in it
+// Helper function to check for TLS handshake errors
+func isTLSHandshakeError(err error) bool {
+	var x509UnknownAuthorityError x509.UnknownAuthorityError
+	if errors.As(err, &x509UnknownAuthorityError) {
+		return true
+	}
+
+	// Other potential TLS errors:
+	// - errors.Is(err, x509.HostnameError{})
+	// - errors.Is(err, x509.CertificateInvalidError{})
+	// Add checks for other relevant TLS error types if needed
+
+	return false
+}
 func (c *Client) getConn(addr net.Addr) (*conn, error) {
 	cn, ok := c.getFreeConn(addr)
 	if ok {
 		cn.extendDeadline()
 		return cn, nil
 	}
+	// First try an SSL connection
+	if c.DialContext == nil {
+		c.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			var td tls.Dialer
+			td.Config = &tls.Config{
+				InsecureSkipVerify: true,
+			}
+			return td.DialContext(ctx, network, addr)
+		}
+	}
 	nc, err := c.dial(addr)
+	// XXX: The following supposes that the TLS connection negotation happens and fails before the first communication with
+	// the server, which is unclear to me - PCN
+	if err != nil && !isTLSHandshakeError(err) {
+		return nil, err
+	} else if err != nil {
+		c.DialContext = nil
+		nc, err = c.dial(addr)
+	}
 	if err != nil {
 		return nil, err
 	}
