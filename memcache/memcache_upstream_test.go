@@ -86,6 +86,8 @@ func TestFakeServer(t *testing.T) {
 	srv := &testServerU{}
 	go srv.Serve(ln)
 
+	// Fails, probably should explicitly use a client that doesn't
+	// use TLS for this
 	testWithClientU(t, New(ln.Addr().String()))
 }
 
