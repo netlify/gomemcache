@@ -20,6 +20,8 @@ package memcache
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -173,6 +175,14 @@ type stop func()
 // Client is a memcache client.
 // It is safe for unlocked use by multiple concurrent goroutines.
 type Client struct {
+	// DialContext connects to the address on the named network using the
+	// provided context.
+	//
+	// To connect to servers using TLS (memcached running with "--enable-ssl"),
+	// use a DialContext func that uses tls.Dialer.DialContext. See this
+	// package's tests as an example.
+	DialContext func(ctx context.Context, network, address string) (net.Conn, error)
+
 	// Timeout specifies the socket read/write timeout.
 	// If zero, DefaultTimeout is used.
 	Timeout time.Duration
@@ -311,6 +321,21 @@ func (c *Client) dial(addr net.Addr) (net.Conn, error) {
 		err error
 	}
 
+	addrComponents := strings.Split(addr.String(), ":")
+	if len(addrComponents) != 2 {
+		// Failure, need to have an address and port separated by a :
+		fmt.Println("Incorrect address type")
+	}
+	dialerCtx := New(net.JoinHostPort(addrComponents[0], addrComponents[1]))
+	// Try TLS first
+	dialerCtx.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		var td tls.Dialer
+		td.Config = &tls.Config{
+			InsecureSkipVerify: true, // XXX maybe not right for production, also other settings, e.g. clientcache?
+		}
+		return td.DialContext(ctx, network, addr)
+	}
+
 	nc, err := net.DialTimeout(addr.Network(), addr.String(), c.netTimeout())
 	if err == nil {
 		return nc, nil
@@ -319,7 +344,22 @@ func (c *Client) dial(addr net.Addr) (net.Conn, error) {
 	if ne, ok := err.(net.Error); ok && ne.Timeout() {
 		return nil, &ConnectTimeoutError{addr}
 	}
+	// End trying to TLS
+	// Next try to use plain text
+	dialerCtx.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, addr)
+	}
 
+	nc, err = net.DialTimeout(addr.Network(), addr.String(), c.netTimeout())
+	if err == nil {
+		return nc, nil
+	}
+
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		return nil, &ConnectTimeoutError{addr}
+	}
+	// If we got this far, fail
 	return nil, err
 }
 
