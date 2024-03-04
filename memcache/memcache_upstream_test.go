@@ -340,7 +340,7 @@ func testWithClientU(t *testing.T, c *Client) {
 	if err == nil || !strings.Contains(err.Error(), "client error") {
 		t.Fatalf("increment non-number: want client error, got %v", err)
 	}
-	testTouchWithClient(t, c)
+	testTouchWithClientU(t, c)
 
 	// Test Delete All
 	err = c.DeleteAll()
@@ -355,7 +355,7 @@ func testWithClientU(t *testing.T, c *Client) {
 	checkErr(err, "error ping: %s", err)
 }
 
-func uTestTouchWithClient(t *testing.T, c *Client) {
+func testTouchWithClientU(t *testing.T, c *Client) {
 	if testing.Short() {
 		t.Log("Skipping testing memcache Touch with testing in Short mode")
 		return
