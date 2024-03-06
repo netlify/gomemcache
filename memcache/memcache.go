@@ -21,7 +21,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -136,7 +135,7 @@ func NewDiscoveryClient(discoveryAddress string, pollingDuration time.Duration, 
 		return nil, ErrInvalidPollingDuration
 	}
 
-	return newDiscoveryClient(discoveryAddress, new(ServerList), pollingDuration)
+	return newDiscoveryClient(discoveryAddress, new(ServerList), pollingDuration, opts...)
 }
 
 func NewDynamicRendezvousClient(discoveryAddress string, pollingDuration time.Duration, opts ...ClientOption) (*Client, error) {
@@ -145,7 +144,7 @@ func NewDynamicRendezvousClient(discoveryAddress string, pollingDuration time.Du
 		return nil, ErrInvalidPollingDuration
 	}
 
-	return newDiscoveryClient(discoveryAddress, NewRendezvousSelector(), pollingDuration)
+	return newDiscoveryClient(discoveryAddress, NewRendezvousSelector(), pollingDuration, opts...)
 }
 
 // for the unit test
@@ -164,22 +163,13 @@ func newDiscoveryClient(discoveryAddress string, selector ServerSelector, pollin
 
 type ClientOption func(*Client)
 
-// WithTLS sets the dial context function for the client.
-func WithTLS() ClientOption {
-	return func(c *Client) {
-		c.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-			return tls.Dial(network, address, &tls.Config{})
-		}
-	}
-}
-
 // New returns a memcache client using the provided server(s)
 // with equal weight. If a server is listed multiple times,
 // it gets a proportional amount of weight.
 func New(server []string, opts ...ClientOption) *Client {
 	ss := new(ServerList)
 	ss.SetServers(server...)
-	return NewFromSelector(ss)
+	return NewFromSelector(ss, opts...)
 }
 
 // NewFromSelector returns a new Client using the provided ServerSelector.
