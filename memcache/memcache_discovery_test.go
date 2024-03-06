@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	testPollingTime          = 1 * time.Second
+	testPollingTime          = 2 * time.Millisecond
 	portLow                  = 49152
 	portHigh                 = 65535
 	memcachedCreationTimeout = 5 * time.Second
