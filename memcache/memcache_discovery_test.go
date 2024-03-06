@@ -20,19 +20,17 @@ package memcache
 import (
 	"context"
 	"errors"
+	"net"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
-
-	"net"
-	"os/exec"
-
 	"testing"
 	"time"
 )
 
 const (
-	testPollingTime          = 2 * time.Millisecond
+	testPollingTime          = 1 * time.Second
 	portLow                  = 49152
 	portHigh                 = 65535
 	memcachedCreationTimeout = 5 * time.Second
