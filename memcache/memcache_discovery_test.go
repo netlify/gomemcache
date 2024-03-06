@@ -20,13 +20,11 @@ package memcache
 import (
 	"context"
 	"errors"
+	"net"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
-
-	"net"
-	"os/exec"
-
 	"testing"
 	"time"
 )
