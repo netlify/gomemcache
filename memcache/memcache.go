@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -129,7 +130,7 @@ var (
 // All the servers which are found are used with equal weight.
 // discoveryAddress should be in following form "ipv4-address:port"
 // Note: pollingDuration should be at least 1 second.
-func NewDiscoveryClient(discoveryAddress string, pollingDuration time.Duration) (*Client, error) {
+func NewDiscoveryClient(discoveryAddress string, pollingDuration time.Duration, opts ...ClientOption) (*Client, error) {
 	// Validate pollingDuration
 	if pollingDuration.Seconds() < 1.0 {
 		return nil, ErrInvalidPollingDuration
@@ -138,7 +139,7 @@ func NewDiscoveryClient(discoveryAddress string, pollingDuration time.Duration) 
 	return newDiscoveryClient(discoveryAddress, new(ServerList), pollingDuration)
 }
 
-func NewDynamicRendezvousClient(discoveryAddress string, pollingDuration time.Duration) (*Client, error) {
+func NewDynamicRendezvousClient(discoveryAddress string, pollingDuration time.Duration, opts ...ClientOption) (*Client, error) {
 	// Validate pollingDuration
 	if pollingDuration.Seconds() < 1.0 {
 		return nil, ErrInvalidPollingDuration
@@ -148,29 +149,46 @@ func NewDynamicRendezvousClient(discoveryAddress string, pollingDuration time.Du
 }
 
 // for the unit test
-func newDiscoveryClient(discoveryAddress string, selector ServerSelector, pollingDuration time.Duration) (*Client, error) {
-	// creates a new ServerList object which contains all the server eventually.
+func newDiscoveryClient(discoveryAddress string, selector ServerSelector, pollingDuration time.Duration, opts ...ClientOption) (*Client, error) {
 	rand.Seed(time.Now().UnixNano())
-	mcCfgPollerHelper := New(discoveryAddress)
-	cfgPoller := newConfigPoller(pollingDuration, selector, mcCfgPollerHelper)
+
+	// creates a new ServerList object which contains all the server eventually.
+	mcCfgPollerHelper := New([]string{discoveryAddress}, opts...)
+
 	// cfgPoller starts polling immediately.
-	mcClient := NewFromSelector(selector)
+	cfgPoller := newConfigPoller(pollingDuration, selector, mcCfgPollerHelper)
+	mcClient := NewFromSelector(selector, opts...)
 	mcClient.stopPolling = cfgPoller.stopPolling
 	return mcClient, nil
+}
+
+type ClientOption func(*Client)
+
+// WithTLS sets the dial context function for the client.
+func WithTLS() ClientOption {
+	return func(c *Client) {
+		c.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			return tls.Dial(network, address, &tls.Config{})
+		}
+	}
 }
 
 // New returns a memcache client using the provided server(s)
 // with equal weight. If a server is listed multiple times,
 // it gets a proportional amount of weight.
-func New(server ...string) *Client {
+func New(server []string, opts ...ClientOption) *Client {
 	ss := new(ServerList)
 	ss.SetServers(server...)
 	return NewFromSelector(ss)
 }
 
 // NewFromSelector returns a new Client using the provided ServerSelector.
-func NewFromSelector(ss ServerSelector) *Client {
-	return &Client{selector: ss}
+func NewFromSelector(ss ServerSelector, opts ...ClientOption) *Client {
+	c := &Client{selector: ss}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 type stop func()
