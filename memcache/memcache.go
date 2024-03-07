@@ -129,48 +129,56 @@ var (
 // All the servers which are found are used with equal weight.
 // discoveryAddress should be in following form "ipv4-address:port"
 // Note: pollingDuration should be at least 1 second.
-func NewDiscoveryClient(discoveryAddress string, pollingDuration time.Duration) (*Client, error) {
+func NewDiscoveryClient(discoveryAddress string, pollingDuration time.Duration, opts ...ClientOption) (*Client, error) {
 	// Validate pollingDuration
 	if pollingDuration.Seconds() < 1.0 {
 		return nil, ErrInvalidPollingDuration
 	}
 
-	return newDiscoveryClient(discoveryAddress, new(ServerList), pollingDuration)
+	return newDiscoveryClient(discoveryAddress, new(ServerList), pollingDuration, opts...)
 }
 
-func NewDynamicRendezvousClient(discoveryAddress string, pollingDuration time.Duration) (*Client, error) {
+func NewDynamicRendezvousClient(discoveryAddress string, pollingDuration time.Duration, opts ...ClientOption) (*Client, error) {
 	// Validate pollingDuration
 	if pollingDuration.Seconds() < 1.0 {
 		return nil, ErrInvalidPollingDuration
 	}
 
-	return newDiscoveryClient(discoveryAddress, NewRendezvousSelector(), pollingDuration)
+	return newDiscoveryClient(discoveryAddress, NewRendezvousSelector(), pollingDuration, opts...)
 }
 
 // for the unit test
-func newDiscoveryClient(discoveryAddress string, selector ServerSelector, pollingDuration time.Duration) (*Client, error) {
-	// creates a new ServerList object which contains all the server eventually.
+func newDiscoveryClient(discoveryAddress string, selector ServerSelector, pollingDuration time.Duration, opts ...ClientOption) (*Client, error) {
 	rand.Seed(time.Now().UnixNano())
-	mcCfgPollerHelper := New(discoveryAddress)
-	cfgPoller := newConfigPoller(pollingDuration, selector, mcCfgPollerHelper)
+
+	// creates a new ServerList object which contains all the server eventually.
+	mcCfgPollerHelper := New([]string{discoveryAddress}, opts...)
+
 	// cfgPoller starts polling immediately.
-	mcClient := NewFromSelector(selector)
+	cfgPoller := newConfigPoller(pollingDuration, selector, mcCfgPollerHelper)
+	mcClient := NewFromSelector(selector, opts...)
 	mcClient.stopPolling = cfgPoller.stopPolling
 	return mcClient, nil
 }
 
+type ClientOption func(*Client)
+
 // New returns a memcache client using the provided server(s)
 // with equal weight. If a server is listed multiple times,
 // it gets a proportional amount of weight.
-func New(server ...string) *Client {
+func New(server []string, opts ...ClientOption) *Client {
 	ss := new(ServerList)
 	ss.SetServers(server...)
-	return NewFromSelector(ss)
+	return NewFromSelector(ss, opts...)
 }
 
 // NewFromSelector returns a new Client using the provided ServerSelector.
-func NewFromSelector(ss ServerSelector) *Client {
-	return &Client{selector: ss}
+func NewFromSelector(ss ServerSelector, opts ...ClientOption) *Client {
+	c := &Client{selector: ss}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 type stop func()
