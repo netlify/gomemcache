@@ -163,6 +163,14 @@ func newDiscoveryClient(discoveryAddress string, selector ServerSelector, pollin
 
 type ClientOption func(*Client)
 
+// WithMaxDialing sets the maximum number of concurrent dialing connections.
+// If not set, the default is unlimited.
+func WithMaxDialing(maxDialing int) ClientOption {
+	return func(c *Client) {
+		c.dialing = make(chan struct{}, maxDialing)
+	}
+}
+
 // New returns a memcache client using the provided server(s)
 // with equal weight. If a server is listed multiple times,
 // it gets a proportional amount of weight.
@@ -222,6 +230,7 @@ type Client struct {
 	selector    ServerSelector
 	stopPolling stop
 
+	dialing  chan struct{}
 	lk       sync.Mutex
 	freeconn map[string][]*conn
 }
@@ -350,6 +359,19 @@ func (c *Client) dial(addr net.Addr) (net.Conn, error) {
 			Timeout: c.connectionTimeout(),
 		}
 		dialerContext = dialer.DialContext
+	}
+
+	if c.dialing != nil {
+		// try to acquire a slot for dialing
+		select {
+		case c.dialing <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		// release the slot when done
+		defer func() {
+			<-c.dialing
+		}()
 	}
 
 	nc, err := dialerContext(ctx, addr.Network(), addr.String())
