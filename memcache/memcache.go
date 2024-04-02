@@ -198,6 +198,10 @@ type Client struct {
 	// If zero, DefaultTimeout is used.
 	Timeout time.Duration
 
+	// ConnectionTimeout specifies the timeout for establishing a connection.
+	// If zero, DefaultTimeout is used.
+	ConnectionTimeout time.Duration
+
 	// MaxIdleConns specifies the maximum number of idle connections that will
 	// be maintained per address. If less than one, DefaultMaxIdleConns will be
 	// used.
@@ -311,6 +315,13 @@ func (c *Client) netTimeout() time.Duration {
 	return DefaultTimeout
 }
 
+func (c *Client) connectionTimeout() time.Duration {
+	if c.ConnectionTimeout != 0 {
+		return c.ConnectionTimeout
+	}
+	return DefaultTimeout
+}
+
 func (c *Client) maxIdleConns() int {
 	if c.MaxIdleConns > 0 {
 		return c.MaxIdleConns
@@ -330,13 +341,13 @@ func (cte *ConnectTimeoutError) Error() string {
 }
 
 func (c *Client) dial(addr net.Addr) (net.Conn, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.netTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), c.connectionTimeout())
 	defer cancel()
 
 	dialerContext := c.DialContext
 	if dialerContext == nil {
 		dialer := net.Dialer{
-			Timeout: c.netTimeout(),
+			Timeout: c.connectionTimeout(),
 		}
 		dialerContext = dialer.DialContext
 	}
