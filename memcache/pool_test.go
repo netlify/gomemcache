@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -68,14 +69,56 @@ func TestPool(t *testing.T) {
 	})
 
 	t.Run("error", func(t *testing.T) {
+		p, created := tpool(addr, PoolConfig{MaxConns: 1})
+		c1, err := p.Get(tctx(t, 100*time.Millisecond))
+		require.NoError(t, err)
+		require.Equal(t, int64(1), created.Load())
 
+		// return with error
+		c1.Release(errors.New("dont reuse"))
+
+		// new connection should be created
+		c2, err := p.Get(tctx(t, 100*time.Millisecond))
+		require.NoError(t, err)
+		require.NotEqual(t, c1, c2)
+		require.Equal(t, int64(2), created.Load())
+
+		// return with resumable error
+		c2.Release(ErrCacheMiss)
+
+		// new connection should not be created
+		c3, err := p.Get(tctx(t, 100*time.Millisecond))
+		require.NoError(t, err)
+		require.Equal(t, c2, c3)
+		require.Equal(t, int64(2), created.Load())
+
+		// cleanup
+		c3.Release(errors.New("dont reuse"))
 	})
 
 	t.Run("load", func(t *testing.T) {
-		//client := New([]string{addr.String()})
-		//p, _ := tpool(addr, PoolConfig{MaxConns: 5})
-		//client.Pool = p
+		created := atomic.Int64{}
+		d := net.Dialer{}
+		dctx := func(ctx context.Context, network, addr string) (net.Conn, error) {
+			created.Add(1)
+			return d.DialContext(ctx, "tcp", addr)
+		}
 
+		client := New([]string{addr.String()})
+		client.Pool = NewClusterPool(dctx, PoolConfig{MaxConns: 10})
+
+		wg := sync.WaitGroup{}
+		for i := 0; i < 100; i++ {
+			wg.Add(1)
+			go func() {
+				for j := 0; j < 1000; j++ {
+					require.NoError(t, client.Ping())
+				}
+				wg.Done()
+			}()
+		}
+		wg.Wait()
+		require.Equal(t, int64(10), created.Load())
 	})
 }
 
