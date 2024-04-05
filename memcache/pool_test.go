@@ -120,6 +120,36 @@ func TestPool(t *testing.T) {
 		wg.Wait()
 		require.Equal(t, int64(10), created.Load())
 	})
+
+	t.Run("stats", func(t *testing.T) {
+		p, _ := tpool(addr, PoolConfig{MaxConns: 1})
+
+		c1, err := p.Get(tctx(t, 100*time.Millisecond))
+		require.NoError(t, err)
+
+		require.Equal(t, int64(1), p.Stats().Miss)
+		require.Equal(t, int64(0), p.Stats().Hit)
+		require.Equal(t, int64(1), p.Stats().Active)
+		require.Equal(t, int64(0), p.Stats().Idle)
+
+		c1.Release(nil)
+
+		require.Equal(t, int64(0), p.Stats().Miss)
+		require.Equal(t, int64(0), p.Stats().Hit)
+		require.Equal(t, int64(0), p.Stats().Active)
+		require.Equal(t, int64(1), p.Stats().Idle)
+
+		c2, err := p.Get(tctx(t, 100*time.Millisecond))
+		require.NoError(t, err)
+
+		require.Equal(t, int64(1), p.Stats().Hit)
+		require.Equal(t, int64(0), p.Stats().Miss)
+		require.Equal(t, int64(1), p.Stats().Active)
+		require.Equal(t, int64(0), p.Stats().Idle)
+
+		// cleanup
+		c2.Release(errors.New("dont reuse"))
+	})
 }
 
 func tpool(addr net.Addr, config PoolConfig) (*Pool, *atomic.Int64) {

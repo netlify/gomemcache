@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -67,6 +68,15 @@ func (cp *ClusterPool) Release(addr net.Addr) {
 	pool.Release()
 }
 
+func (cp *ClusterPool) Each(fn func(string, *Pool)) {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+
+	for addr, pool := range cp.pools {
+		fn(addr, pool)
+	}
+}
+
 // getPool returns the pool for the given address, creating it if necessary.
 // This is required because the cluster is dynamic and new servers can be added at any time.
 func (cp *ClusterPool) getPool(addr net.Addr) *Pool {
@@ -104,6 +114,8 @@ type Pool struct {
 	mu     sync.Mutex
 	idle   []idleConn
 	active chan struct{}
+	hits   atomic.Int64
+	misses atomic.Int64
 }
 
 type idleConn struct {
@@ -147,8 +159,10 @@ func (p *Pool) Get(ctx context.Context) (*Conn, error) {
 
 	// then try to get an idle connection
 	if c := p.getIdle(); c != nil {
+		p.hits.Add(1)
 		return c, nil
 	}
+	p.misses.Add(1)
 
 	// if no idle connection, create a new one
 	nc, err := p.dialer(ctx, p.addr.Network(), p.addr.String())
@@ -215,6 +229,25 @@ func (p *Pool) closeIdle() {
 		}
 	}
 	p.idle = idle
+}
+
+func (p *Pool) Stats() PoolStats {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return PoolStats{
+		Active: int64(len(p.active)),
+		Idle:   int64(len(p.idle)),
+		Hit:    p.hits.Swap(0),
+		Miss:   p.misses.Swap(0),
+	}
+}
+
+type PoolStats struct {
+	Active int64 // number of active connections
+	Idle   int64 // number of idle connections
+	Hit    int64 // number of cache hits (since last call to Stats)
+	Miss   int64 // number of cache misses (since last call to Stats)
 }
 
 type Conn struct {
