@@ -3,8 +3,8 @@ module github.com/netlify/gomemcache
 go 1.19
 
 require (
-	github.com/stretchr/testify v1.8.0
-	go.uber.org/atomic v1.7.0
+	github.com/ory/dockertest/v3 v3.10.0
+	github.com/stretchr/testify v1.9.0
 )
 
 require (
@@ -26,7 +26,6 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.0.2 // indirect
 	github.com/opencontainers/runc v1.1.5 // indirect
-	github.com/ory/dockertest/v3 v3.10.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/sirupsen/logrus v1.8.1 // indirect
