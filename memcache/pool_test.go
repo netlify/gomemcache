@@ -175,7 +175,7 @@ func setupMemcached(t *testing.T) net.Addr {
 	require.NoError(t, err)
 	require.NoError(t, pool.Client.Ping())
 
-	fmt.Println("Starting memcached container...")
+	t.Log("Starting memcached container...")
 	resource, err := pool.RunWithOptions(&dockertest.RunOptions{
 		Repository:   "memcached",
 		Tag:          "1.6.12",
@@ -184,19 +184,22 @@ func setupMemcached(t *testing.T) net.Addr {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		require.NoError(t, pool.Purge(resource))
-		fmt.Println("Memcached container purged")
+		if err := pool.Purge(resource); err != nil {
+			panic("could not purge resource: " + err.Error())
+		}
+
+		t.Log("Memcached container purged")
 	})
 
 	addr := fmt.Sprintf("localhost:%s", resource.GetPort("11211/tcp"))
-	fmt.Println("Memcached container started at: ", addr)
+	t.Log("Memcached container started at: ", addr)
 
-	fmt.Println("Waiting for memcached to be ready...")
+	t.Log("Waiting for memcached to be ready...")
 	require.NoError(t, pool.Retry(func() error {
 		return ping(addr)
 	}))
 
-	fmt.Println("Memcached is ready")
+	t.Log("Memcached is ready")
 
 	return dockerAddr{address: addr}
 }
