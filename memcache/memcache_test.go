@@ -149,14 +149,13 @@ func TestTLS(t *testing.T) {
 	}
 
 	c := New([]string{net.JoinHostPort("127.0.0.1", strconv.Itoa(port))})
-	c.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+	c.Pool = NewClusterPool(func(ctx context.Context, network, addr string) (net.Conn, error) {
 		var td tls.Dialer
 		td.Config = &tls.Config{
 			InsecureSkipVerify: true,
 		}
 		return td.DialContext(ctx, network, addr)
-
-	}
+	}, PoolConfig{})
 	testWithClient(t, c)
 }
 

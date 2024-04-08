@@ -30,8 +30,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"go.uber.org/atomic"
 )
 
 // Similar to:
@@ -75,25 +73,9 @@ var (
 const (
 	// DefaultTimeout is the default socket read/write timeout.
 	DefaultTimeout = 500 * time.Millisecond
-
-	// DefaultMaxIdleConns is the default maximum number of idle connections
-	// kept for any single address.
-	DefaultMaxIdleConns = 2
 )
 
 const buffered = 8 // arbitrary buffered channel size, for readability
-
-// resumableError returns true if err is only a protocol-level cache error.
-// This is used to determine whether or not a server connection should
-// be re-used or not. If an error occurs, by default we don't reuse the
-// connection, unless it was just a cache error.
-func resumableError(err error) bool {
-	switch err {
-	case ErrCacheMiss, ErrCASConflict, ErrNotStored, ErrMalformedKey:
-		return true
-	}
-	return false
-}
 
 func legalKey(key string) bool {
 	if len(key) > 250 {
@@ -163,14 +145,6 @@ func newDiscoveryClient(discoveryAddress string, selector ServerSelector, pollin
 
 type ClientOption func(*Client)
 
-// WithMaxDialing sets the maximum number of concurrent dialing connections.
-// If not set, the default is unlimited.
-func WithMaxDialing(maxDialing int) ClientOption {
-	return func(c *Client) {
-		c.dialing = make(chan struct{}, maxDialing)
-	}
-}
-
 // New returns a memcache client using the provided server(s)
 // with equal weight. If a server is listed multiple times,
 // it gets a proportional amount of weight.
@@ -182,7 +156,11 @@ func New(server []string, opts ...ClientOption) *Client {
 
 // NewFromSelector returns a new Client using the provided ServerSelector.
 func NewFromSelector(ss ServerSelector, opts ...ClientOption) *Client {
-	c := &Client{selector: ss}
+	defaultDialer := &net.Dialer{}
+	c := &Client{
+		selector: ss,
+		Pool:     NewClusterPool(defaultDialer.DialContext, PoolConfig{}),
+	}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -194,14 +172,6 @@ type stop func()
 // Client is a memcache client.
 // It is safe for unlocked use by multiple concurrent goroutines.
 type Client struct {
-	// DialContext connects to the address on the named network using the
-	// provided context.
-	//
-	// To connect to servers using TLS (memcached running with "--enable-ssl"),
-	// use a DialContext func that uses tls.Dialer.DialContext. See this
-	// package's tests as an example.
-	DialContext func(ctx context.Context, network, address string) (net.Conn, error)
-
 	// Timeout specifies the socket read/write timeout.
 	// If zero, DefaultTimeout is used.
 	Timeout time.Duration
@@ -210,29 +180,9 @@ type Client struct {
 	// If zero, DefaultTimeout is used.
 	ConnectionTimeout time.Duration
 
-	// MaxIdleConns specifies the maximum number of idle connections that will
-	// be maintained per address. If less than one, DefaultMaxIdleConns will be
-	// used.
-	//
-	// Consider your expected traffic rates and latency carefully. This should
-	// be set to a number higher than your peak parallel requests.
-	MaxIdleConns int
-
-	// TotalConnections tracks how many new connections have been created over
-	// the lifetime of the client. Use it to identify if MaxIdleConns should be
-	// adjusted. A high rate of new connections may mean that you should adjust
-	// MaxIdleConns higher.
-	//
-	// This is a monotonically increasing value, plat the derivative over time to
-	// track rate change.
-	TotalConnections atomic.Uint64
-
+	Pool        *ClusterPool
 	selector    ServerSelector
 	stopPolling stop
-
-	dialing  chan struct{}
-	lk       sync.Mutex
-	freeconn map[string][]*conn
 }
 
 // Item is an item to be got or stored in a memcached server.
@@ -259,64 +209,6 @@ type Item struct {
 	CasID uint64
 }
 
-// conn is a connection to a server.
-type conn struct {
-	nc   net.Conn
-	rw   *bufio.ReadWriter
-	addr net.Addr
-	c    *Client
-}
-
-// release returns this connection back to the client's free pool
-func (cn *conn) release() {
-	cn.c.putFreeConn(cn.addr, cn)
-}
-
-func (cn *conn) extendDeadline() {
-	cn.nc.SetDeadline(time.Now().Add(cn.c.netTimeout()))
-}
-
-// condRelease releases this connection if the error pointed to by err
-// is nil (not an error) or is only a protocol level error (e.g. a
-// cache miss).  The purpose is to not recycle TCP connections that
-// are bad.
-func (cn *conn) condRelease(err *error) {
-	if *err == nil || resumableError(*err) {
-		cn.release()
-	} else {
-		cn.nc.Close()
-	}
-}
-
-func (c *Client) putFreeConn(addr net.Addr, cn *conn) {
-	c.lk.Lock()
-	defer c.lk.Unlock()
-	if c.freeconn == nil {
-		c.freeconn = make(map[string][]*conn)
-	}
-	freelist := c.freeconn[addr.String()]
-	if len(freelist) >= c.maxIdleConns() {
-		cn.nc.Close()
-		return
-	}
-	c.freeconn[addr.String()] = append(freelist, cn)
-}
-
-func (c *Client) getFreeConn(addr net.Addr) (cn *conn, ok bool) {
-	c.lk.Lock()
-	defer c.lk.Unlock()
-	if c.freeconn == nil {
-		return nil, false
-	}
-	freelist, ok := c.freeconn[addr.String()]
-	if !ok || len(freelist) == 0 {
-		return nil, false
-	}
-	cn = freelist[len(freelist)-1]
-	c.freeconn[addr.String()] = freelist[:len(freelist)-1]
-	return cn, true
-}
-
 func (c *Client) netTimeout() time.Duration {
 	if c.Timeout != 0 {
 		return c.Timeout
@@ -331,79 +223,15 @@ func (c *Client) connectionTimeout() time.Duration {
 	return DefaultTimeout
 }
 
-func (c *Client) maxIdleConns() int {
-	if c.MaxIdleConns > 0 {
-		return c.MaxIdleConns
-	}
-	return DefaultMaxIdleConns
-}
-
-// ConnectTimeoutError is the error type used when it takes
-// too long to connect to the desired host. This level of
-// detail can generally be ignored.
-type ConnectTimeoutError struct {
-	Addr net.Addr
-}
-
-func (cte *ConnectTimeoutError) Error() string {
-	return "memcache: connect timeout to " + cte.Addr.String()
-}
-
-func (c *Client) dial(addr net.Addr) (net.Conn, error) {
+func (c *Client) getConn(addr net.Addr) (*Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.connectionTimeout())
 	defer cancel()
-
-	dialerContext := c.DialContext
-	if dialerContext == nil {
-		dialer := net.Dialer{
-			Timeout: c.connectionTimeout(),
-		}
-		dialerContext = dialer.DialContext
-	}
-
-	if c.dialing != nil {
-		// try to acquire a slot for dialing
-		select {
-		case c.dialing <- struct{}{}:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-		// release the slot when done
-		defer func() {
-			<-c.dialing
-		}()
-	}
-
-	nc, err := dialerContext(ctx, addr.Network(), addr.String())
-	if err == nil {
-		return nc, nil
-	}
-
-	if ne, ok := err.(net.Error); ok && ne.Timeout() {
-		return nil, &ConnectTimeoutError{addr}
-	}
-
-	return nil, err
-}
-
-func (c *Client) getConn(addr net.Addr) (*conn, error) {
-	cn, ok := c.getFreeConn(addr)
-	if ok {
-		cn.extendDeadline()
-		return cn, nil
-	}
-	nc, err := c.dial(addr)
+	cn, err := c.Pool.Get(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
-	cn = &conn{
-		nc:   nc,
-		addr: addr,
-		rw:   bufio.NewReadWriter(bufio.NewReader(nc), bufio.NewWriter(nc)),
-		c:    c,
-	}
-	cn.extendDeadline()
-	c.TotalConnections.Inc()
+
+	cn.ExtendDeadline(c.netTimeout())
 	return cn, nil
 }
 
@@ -416,10 +244,13 @@ func (c *Client) onItem(item *Item, fn func(*Client, *bufio.ReadWriter, *Item) e
 	if err != nil {
 		return err
 	}
-	defer cn.condRelease(&err)
+
 	if err = fn(c, cn.rw, item); err != nil {
+		cn.Release(err)
 		return err
 	}
+
+	cn.Release(nil)
 	return nil
 }
 
@@ -466,8 +297,14 @@ func (c *Client) withAddrRw(addr net.Addr, fn func(*bufio.ReadWriter) error) (er
 	if err != nil {
 		return err
 	}
-	defer cn.condRelease(&err)
-	return fn(cn.rw)
+
+	if err := fn(cn.rw); err != nil {
+		cn.Release(err)
+		return err
+	}
+
+	cn.Release(nil)
+	return nil
 }
 
 func (c *Client) withKeyRw(key string, fn func(*bufio.ReadWriter) error) error {
@@ -898,25 +735,4 @@ func (c *Client) getConfigFromAddr(addr net.Addr, configType string, cb func(*Cl
 		}
 		return nil
 	})
-}
-
-// Close closes any open connections.
-//
-// It returns the first error encountered closing connections, but always
-// closes all connections.
-//
-// After Close, the Client may still be used.
-func (c *Client) Close() error {
-	c.lk.Lock()
-	defer c.lk.Unlock()
-	var ret error
-	for _, conns := range c.freeconn {
-		for _, c := range conns {
-			if err := c.nc.Close(); err != nil && ret == nil {
-				ret = err
-			}
-		}
-	}
-	c.freeconn = nil
-	return ret
 }
