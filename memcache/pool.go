@@ -20,6 +20,9 @@ type PoolConfig struct {
 	MaxConns        int           // maximum number of connections to keep open per server (includes active and idle connections)
 	MaxIdleLifetime time.Duration // maximum amount of time an idle connection is kept open
 	IdleClosePeriod time.Duration // how often to close (reap) idle connections
+
+	OnAcquire func(string, error, time.Duration) // when we acquire a connection slot
+	OnCreate  func(string, error, time.Duration) // when we create a new connection
 }
 
 // withDefaults sets default values for any zero fields in the config.
@@ -32,6 +35,14 @@ func (c *PoolConfig) withDefaults() {
 	}
 	if c.IdleClosePeriod == 0 {
 		c.IdleClosePeriod = DefaultIdleClosePeriod
+	}
+
+	if c.OnAcquire == nil {
+		c.OnAcquire = func(string, error, time.Duration) {}
+	}
+
+	if c.OnCreate == nil {
+		c.OnCreate = func(string, error, time.Duration) {}
 	}
 }
 
@@ -151,11 +162,14 @@ func NewPool(addr net.Addr, dial dialer, config PoolConfig) *Pool {
 // If max connections are already in use, Get will block until a connection is available or the context is canceled.
 func (p *Pool) Get(ctx context.Context) (*Conn, error) {
 	// first acquire a slot
+	acquireStart := time.Now()
 	select {
 	case <-ctx.Done():
+		p.config.OnAcquire(p.addr.String(), ctx.Err(), time.Since(acquireStart))
 		return nil, ctx.Err()
 	case p.active <- struct{}{}:
 	}
+	p.config.OnAcquire(p.addr.String(), nil, time.Since(acquireStart))
 
 	// then try to get an idle connection
 	if c := p.getIdle(); c != nil {
@@ -165,8 +179,10 @@ func (p *Pool) Get(ctx context.Context) (*Conn, error) {
 	p.misses.Add(1)
 
 	// if no idle connection, create a new one
+	createStart := time.Now()
 	nc, err := p.dialer(ctx, p.addr.Network(), p.addr.String())
 	if err != nil {
+		p.config.OnCreate(p.addr.String(), err, time.Since(createStart))
 		// release the slot
 		<-p.active
 
@@ -176,6 +192,7 @@ func (p *Pool) Get(ctx context.Context) (*Conn, error) {
 		}
 		return nil, err
 	}
+	p.config.OnCreate(p.addr.String(), nil, time.Since(createStart))
 
 	return &Conn{
 		nc:   nc,
